@@ -18,3 +18,4 @@ typedef struct {
 esp_err_t init_camera(void);
 esp_err_t get_picture(color_stats_t *stats);
 void imprimir_resultado(color_stats_t* stats);
+color_stats_t analizar_colores(camera_fb_t *pic);

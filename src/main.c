@@ -1,47 +1,64 @@
 //Librerias de ESP32
-#include <nvs_flash.h>          // ALMACENAMIENTO NO VOLATIL (GUARDA DATOS AL APAGAR)
-#include "esp_heap_caps.h"
-#include "esp_system.h"
-#include "esp_log.h"
+#include "esp_log.h"            //Informacion por medio de LOGS
+#include "esp_sleep.h"          //Biblioteca para DEEP SLEEP
+#include "driver/gpio.h"        //Driver de pines GPIO
 
 //Libreria propias
-#include "assets/control_camara/control_camara.h"
+#include "assets/control_camara/control_camara.h"   //Control de la camara
+#include "assets/wifi_connection/wifi_connection.h" //Control de conexion WIFI
+#include "assets/memoria/memoria.h"                 //Control de displays de memoria
+#include "assets/sistema/sistema.h"                 //Control de display de sistema
+
+#define GPIO_WAKEUP GPIO_NUM_21
 
 static const char* component = "app";
-void print_memory_info();
+
+static RTC_DATA_ATTR uint8_t COMMAREA = 0b00000001;
 
 void app_main(void){
-    print_memory_info("INIT");
-
-    //Inicializa la FLASH
-    nvs_flash_init();
-    print_memory_info("FLASH");
-
-    //Inicializa la camara
+    ESP_LOGI(component, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause(); //Causas de wakeup
+    if (wakeup_cause == ESP_SLEEP_WAKEUP_EXT0) {
+        //Si desperto por pin GPIO o despertar externo
+        ESP_LOGI(component, "Despertó por GPIO %d", GPIO_WAKEUP);
+    } 
+    // Configurar pin con pulldown interno
+    gpio_pulldown_en(GPIO_WAKEUP);  //Activa la resistencia que coloca a 0V
+    gpio_pullup_dis(GPIO_WAKEUP);   //Desactiva la resistencia que coloca a 3.3V
+    
+    //Si es la primera ejeccuion
+    if(COMMAREA & 1){
+        ESP_LOGI(component, "Inicio aplicacion");   //Coloca en el log el inicio de la aplicacion
+        info_sistema();                             //Imprime la informacion del sistema
+        info_memoria("INIT");                       //Imprime la informacion de memoria inicialmente
+        COMMAREA = COMMAREA >> 1;                   //Mueve 1 al ultimo bit para solo ejecutar la primera vez
+        ESP_LOGI(component, "Commarea: %d", COMMAREA);  
+    }
+    
+    esp_err_t err = inicializar_memoria_flash();    //Inicializa la FLASH
+    if (ESP_OK != err){
+        //Si hubo un error entonces lo reporta y termina
+        ESP_LOGE(component, "Error inicializando memoria: %s", esp_err_to_name(err));
+        return;
+    }
+    info_memoria("FLASH");  //Imprime la informacion de la memoria flash
+    
+    establecer_conexion();  //Establece la conexion con en la red
+    info_memoria("WIFI");   //Imprime informacion de la memoria flash luego de la conexion
+    
+    //Control de la camara
     if(ESP_OK != init_camera()) return;
-    print_memory_info("INIT-CAM");
-
-    //Toma la foto
-    color_stats_t stats = {0};          //Creamos la estructura 
+    color_stats_t stats = {0};                //Creamos la estructura 
     if(ESP_OK != get_picture(&stats)) return; //Retorna las estadisticas de la foto 
-    print_memory_info("STATS");
-
-
+    info_memoria("INIT-CAM");
+    
+    //Imprime las estadisticas
     imprimir_resultado(&stats);
-    print_memory_info("PRINT-STATS");
-}
-
-void print_memory_info(char* titulo) {
-    ESP_LOGI(component, "━━━━━━━━━━━━━━ START-%s ━━━━━━━━━━━━━━", titulo);
-    // Memoria heap libre total
-    ESP_LOGI(component, "Heap libre: %lu bytes", esp_get_free_heap_size());
-    // Mínimo histórico (el menor valor que ha tenido)
-    ESP_LOGI(component, "Heap mínimo histórico: %lu bytes", esp_get_minimum_free_heap_size());
-    // Memoria interna (DRAM)
-    ESP_LOGI(component, "DRAM libre: %d bytes", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    // Memoria PSRAM (si tienes módulo con PSRAM como el WROVER)
-    ESP_LOGI(component, "PSRAM libre: %d bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    // Bloque contiguo más grande disponible
-    ESP_LOGI(component, "Bloque más grande: %d bytes", heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-    ESP_LOGI(component, "━━━━━━━━━━━━━━ ENDOF-%s ━━━━━━━━━━━━━━", titulo);
+    
+    info_memoria("FINAL");
+    ESP_LOGI(component, "Modo Deep Sleep");
+    ESP_LOGI(component, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // Despertar cuando el pin sube a HIGH
+    esp_sleep_enable_ext0_wakeup(GPIO_WAKEUP, 1);
+    esp_deep_sleep_start();
 }

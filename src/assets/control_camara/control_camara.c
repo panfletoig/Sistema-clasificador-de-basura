@@ -59,8 +59,40 @@ static camera_config_t camera_config = {
     .grab_mode    = CAMERA_GRAB_WHEN_EMPTY, //CAPTURA SIN SOBRE ESCRIBIR EL BUFFER ACTUAL
 };
 
+// inicializa la camara
+esp_err_t init_camera(void){
+    esp_err_t err = esp_camera_init(&camera_config); //Coloca las configuraciones a la camara
+    
+    //Evalua la respuesta de la camara
+    if(err != ESP_OK){
+        ESP_LOGE(component, "Fallo de grabedad la camara: %s (0x%x)", esp_err_to_name(err), err);
+        return err;
+    }
+    //Envia mensaje de que se inicializo la camara correctamente
+    ESP_LOGI(component, "Camara iniciada correctamente");
+    return ESP_OK;
+}
+
+// Toma la foto y devuelve estadisticas
+esp_err_t get_picture(color_stats_t *stats){
+    ESP_LOGI(component, "Obteniendo imagen.."); //GUARDAMOS EN LOG
+    camera_fb_t *pic = esp_camera_fb_get(); //Toma la imagen
+
+    /* Si el puntero es nulo lo reporta */
+    if(pic == NULL){
+        ESP_LOGE(component, "Frame buffer nulo");
+        return ESP_ERR_CAMERA_BASE;
+    }
+
+    // Obtiene las estadisticas de colores en la estructura
+    *stats = analizar_colores(pic);
+    esp_camera_fb_return(pic);
+
+    return ESP_OK;
+}
+
 //Estadisticas de colores
-static color_stats_t analizar_colores(camera_fb_t *pic){
+color_stats_t analizar_colores(camera_fb_t *pic){
     color_stats_t stats = {0};
     uint16_t *pixels = (uint16_t *)pic->buf;
     int total = pic->width * pic->height;
@@ -108,36 +140,4 @@ void imprimir_resultado(color_stats_t* stats){
         ESP_LOGI(component, "  Dominante     : 🔵 AZUL");
     }
     ESP_LOGI(component, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-}
-
-// inicializa la camara
-esp_err_t init_camera(void){
-    esp_err_t err = esp_camera_init(&camera_config); //Coloca las configuraciones a la camara
-    
-    //Evalua la respuesta de la camara
-    if(err != ESP_OK){
-        ESP_LOGE(component, "Fallo de grabedad la camara: %s (0x%x)", esp_err_to_name(err), err);
-        return err;
-    }
-    //Envia mensaje de que se inicializo la camara correctamente
-    ESP_LOGI(component, "Camara iniciada correctamente");
-    return ESP_OK;
-}
-
-// Toma la foto y devuelve estadisticas
-esp_err_t get_picture(color_stats_t *stats){
-    ESP_LOGI(component, "Obteniendo imagen.."); //GUARDAMOS EN LOG
-    camera_fb_t *pic = esp_camera_fb_get(); //Toma la imagen
-
-    /* Si el puntero es nulo lo reporta */
-    if(pic == NULL){
-        ESP_LOGE(component, "Frame buffer nulo");
-        return ESP_ERR_CAMERA_BASE;
-    }
-
-    // Obtiene las estadisticas de colores en la estructura
-    *stats = analizar_colores(pic);
-    esp_camera_fb_return(pic);
-
-    return ESP_OK;
 }
