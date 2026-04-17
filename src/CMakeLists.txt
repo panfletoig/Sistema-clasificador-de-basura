@@ -9,4 +9,5 @@ idf_component_register(
     INCLUDE_DIRS 
     "."
     "assets"
+    REQUIRES esp-tflite-micro
     )

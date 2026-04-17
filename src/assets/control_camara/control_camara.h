@@ -6,16 +6,5 @@
 //Libreria ESP32
 #include "../components/esp32-camera/driver/include/esp_camera.h" //LIBRERIA DE CAMARA
 
-//Estructuras
-typedef struct {
-    uint32_t rojos;
-    uint32_t verdes;
-    uint32_t azules;
-    uint32_t total;
-} color_stats_t;
-
 //Funciones
-esp_err_t init_camera(void);
-esp_err_t get_picture(color_stats_t *stats);
-void imprimir_resultado(color_stats_t* stats);
-color_stats_t analizar_colores(camera_fb_t *pic);
+esp_err_t get_picture(uint8_t **out_rgb888, size_t *out_size);
