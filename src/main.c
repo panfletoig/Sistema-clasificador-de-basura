@@ -4,21 +4,27 @@
 #include "driver/gpio.h"        //Driver de pines GPIO
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
+#include "driver/sdmmc_host.h"
+#include "sdmmc_cmd.h"
+#include "esp_vfs_fat.h"
 
 //Libreria propias
 #include "assets/control_camara/control_camara.h"   //Control de la camara
 #include "assets/wifi_connection/wifi_connection.h" //Control de conexion WIFI
 #include "assets/memoria/memoria.h"                 //Control de displays de memoria
 #include "assets/sistema/sistema.h"                 //Control de display de sistema
+#ifdef MODULO_IA
 #include "assets/computer-vision/vision_tflite.h"
-
+#endif
+#include "assets/almacenamiento/almacenamiento.h"
 #define GPIO_WAKEUP GPIO_NUM_21
+
+/* FUNCIONES */
+void control_IA(uint8_t *out);
 
 static const char* component = "app";
 
 static RTC_DATA_ATTR uint8_t COMMAREA = 0b00000001;
-
-void save_as_bmp(const char *filename, uint8_t *rgb, int width, int height);
 
 void app_main(void){
     ESP_LOGI(component, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -60,6 +66,22 @@ void app_main(void){
         return;    
     }
 
+    control_IA(out);
+    
+    info_memoria("FINAL");
+    ESP_LOGI(component, "Modo Deep Sleep");
+    ESP_LOGI(component, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    // Despertar cuando el pin sube a HIGH
+    mount_sd();
+    free(out);
+    out = NULL;
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_sleep_enable_ext0_wakeup(GPIO_WAKEUP, 1);
+    esp_deep_sleep_start();
+}
+
+void control_IA(uint8_t *out){
+    #ifdef MODULO_IA
     char resultado;
     run_model(out, &resultado);
     if(resultado == '1'){
@@ -74,58 +96,7 @@ void app_main(void){
     else{
         resultado = 'N';
     }
-    ESP_LOGI(component, "Resultado inferencia: %c", resultado);    
-
-    save_as_bmp("/sdcard/foto.bmp", out, 96, 96);
-    
-    info_memoria("FINAL");
-    ESP_LOGI(component, "Modo Deep Sleep");
-    ESP_LOGI(component, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    // Despertar cuando el pin sube a HIGH
-    free(out);
-    out = NULL;
-    esp_sleep_enable_ext0_wakeup(GPIO_WAKEUP, 1);
-    esp_deep_sleep_start();
-}
-
-void save_as_bmp(const char *filename, uint8_t *rgb, int width, int height)
-{
-    FILE *f = fopen(filename, "wb");
-    if (!f) return;
-
-    int filesize = 54 + 3 * width * height;
-
-    uint8_t fileHeader[14] = {
-        'B','M',  // tipo BMP
-        filesize, filesize>>8, filesize>>16, filesize>>24,
-        0,0, 0,0,
-        54,0,0,0
-    };
-
-    uint8_t infoHeader[40] = {
-        40,0,0,0,
-        width, width>>8, width>>16, width>>24,
-        height, height>>8, height>>16, height>>24,
-        1,0,
-        24,0
-    };
-
-    fwrite(fileHeader, 1, 14, f);
-    fwrite(infoHeader, 1, 40, f);
-
-    // BMP guarda en BGR y de abajo hacia arriba
-    for (int y = height - 1; y >= 0; y--) {
-        for (int x = 0; x < width; x++) {
-            int i = (y * width + x) * 3;
-
-            uint8_t r = rgb[i];
-            uint8_t g = rgb[i + 1];
-            uint8_t b = rgb[i + 2];
-
-            uint8_t pixel[3] = {b, g, r}; // RGB → BGR
-            fwrite(pixel, 1, 3, f);
-        }
-    }
-
-    fclose(f);
+    ESP_LOGI(component, "Resultado inferencia: %c", resultado);   
+    #endif
+    return;
 }

@@ -1,3 +1,4 @@
+#ifdef MODULO_IA
 #include <stdio.h>
 #include "esp_system.h"
 #include "esp_log.h"
@@ -7,7 +8,6 @@
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <esp_timer.h>
@@ -26,7 +26,6 @@ static uint8_t* tensor_arena = nullptr;
 static tflite::MicroMutableOpResolver<12> micro_op_resolver;  // global
 
 // Declaración de los tensores y el intérprete
-tflite::ErrorReporter *error_reporter = nullptr;
 const tflite::Model *model = nullptr;
 tflite::MicroInterpreter *interpreter = nullptr;
 TfLiteTensor *input = nullptr;
@@ -110,14 +109,11 @@ void run_inference(const unsigned char *model_data, uint8_t* input_buffer, char*
         return;
     }
     
-    ESP_LOGI(MODEL_TAG, "1");
     RegisterOps(micro_op_resolver);
     
-    ESP_LOGI(MODEL_TAG, "2");
     tflite::MicroInterpreter static_interpreter(model, micro_op_resolver, tensor_arena, kTensorArenaSize);
     interpreter = &static_interpreter;
     
-    ESP_LOGI(MODEL_TAG, "3");
     // Asignar tensores
     if (interpreter->AllocateTensors() != kTfLiteOk)
     {
@@ -125,7 +121,6 @@ void run_inference(const unsigned char *model_data, uint8_t* input_buffer, char*
         return;
     }
     
-    ESP_LOGI(MODEL_TAG, "4");
     // Obtener tensores de entrada y salida
     input = interpreter->input(0);
     if (input == nullptr) {
@@ -139,7 +134,6 @@ void run_inference(const unsigned char *model_data, uint8_t* input_buffer, char*
         return;
     }
     bool is_int8 = (input->type == kTfLiteInt8);
-    ESP_LOGI(MODEL_TAG, "5");
     
     // Preprocesar la imagen
     int8_t *image_data = (int8_t*) heap_caps_malloc(IMAGE_WIDTH * IMAGE_HEIGHT * 3, MALLOC_CAP_SPIRAM);
@@ -153,28 +147,22 @@ void run_inference(const unsigned char *model_data, uint8_t* input_buffer, char*
     }
 
     preprocess_image(input_buffer, image_data, is_int8);
-    ESP_LOGI(MODEL_TAG, "6");
     
     // Copiar datos preprocesados al tensor de entrada
     memcpy(input->data.int8, image_data, sizeof(image_data));
     free(image_data); // ✅ liberar antes de invocar, ya no se necesita
-    ESP_LOGI(MODEL_TAG, "7");
     
     // Ejecutar la inferencia
     start_time = esp_timer_get_time();
-    ESP_LOGI(MODEL_TAG, "8");
     interpreter->Invoke();
-    ESP_LOGI(MODEL_TAG, "9");
     end_time = esp_timer_get_time();
     ESP_LOGI(MODEL_TAG, "Inference time: %.6f s", (end_time - start_time)/ 1000000.0);
-    
-    ESP_LOGI(MODEL_TAG, "10");
     // Manejar la salida del modelo
     printPredictedClass(result);
-    ESP_LOGI(MODEL_TAG, "11");
 }
 
 extern "C" void run_model(uint8_t* input_buffer, char* result)
 {
     run_inference(modelo_tflite, input_buffer, result);
 }
+#endif

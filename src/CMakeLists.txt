@@ -11,3 +11,4 @@ idf_component_register(
     "assets"
     REQUIRES esp-tflite-micro
     )
+
