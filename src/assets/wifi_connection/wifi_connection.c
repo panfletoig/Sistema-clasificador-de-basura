@@ -6,17 +6,23 @@
 #include "esp_wifi.h"               //Configuración y control del módulo Wi-Fi
 #include "esp_netif.h"              //Abstracción de interfaz de red (TCP/IP stack)
 #include "esp_log.h"                //Sistema de logging con niveles (ERROR, WARN, INFO, DEBUG)
+#include "lwip/dns.h"
+
+
+#include "assets/wifi_connection/http_client.h"
 
 //Credenciales de RED
-#define wifi_id "TIGO-4488"         //Wifi_net_identifier
-#define wifi_pwd "2NJ555301639"     //Wifi_pass
+//#define wifi_id "TIGO-4488"         //Wifi_net_identifier
+//#define wifi_pwd "2NJ555301639"     //Wifi_pass
+#define wifi_id "Carlosint"         //Wifi_net_identifier
+#define wifi_pwd "semillero"     //Wifi_pass
 
 //Bits usados para señalizar el resultado
 #define WIFI_CONNECTED_BIT BIT0     //Event bit por si se conecta
 #define WIFI_FAIL_BIT      BIT1     //Event bit por si falla
 
 // Variables Privadas
-static const char* component = "wifi_connection";   //Tag para el LOG
+static const char* componente = "wifi_connection";   //Tag para el LOG
 static EventGroupHandle_t wifi_events;              //Manejador de eventos
 
 //Variables Persistentes en RTC - WIFI (Optimiza tiempo de conexion a internet)
@@ -30,7 +36,7 @@ static RTC_DATA_ATTR bool      rtc_wifi_saved = false; //Indica si esta guardada
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data) {
     if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         /* Si se desconectado intenta reconectar */
-        ESP_LOGW(component, "Desconectado, reintentando...");
+        ESP_LOGW(componente, "Desconectado, reintentando...");
         esp_wifi_connect();
     }
     else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
@@ -52,9 +58,24 @@ static void guardar_conexion() {
     rtc_ip   = ip_info.ip.addr;         //Guarda la IP en variable RTC
     rtc_gw   = ip_info.gw.addr;         //Guarda el GATEWAY en variable RTC
     rtc_mask = ip_info.netmask.addr;    //Guarda la mascara en variable RTC
-    ESP_LOGI(component, "IP: " IPSTR, IP2STR(&ip_info.ip)); //Imprime la ip en el LOG 
+    ESP_LOGI(componente, "IP: " IPSTR, IP2STR(&ip_info.ip)); //Imprime la ip en el LOG 
 
     rtc_wifi_saved = true; //Coloca como guardado el wifi en variable RTC
+}
+
+void set_dns_manual() {
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif == NULL) {
+        ESP_LOGE("DNS", "netif NULL — llama set_dns_manual() después de esp_wifi_start()");
+        return;
+    }
+
+    esp_netif_dns_info_t dns = {
+        .ip.u_addr.ip4.addr = ipaddr_addr("8.8.8.8"),
+        .ip.type            = IPADDR_TYPE_V4,
+    };
+    esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns);
+    ESP_LOGI("DNS", "DNS configurado: " IPSTR, IP2STR(&dns.ip.u_addr.ip4));
 }
 
 static void fast_wifi_connect() {
@@ -76,6 +97,9 @@ static void fast_wifi_connect() {
     };
 
     esp_netif_set_ip_info(netif, &ip_info);                     //Coloca la info de la estructura
+    
+    set_dns_manual();
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();        //Usa las configuraciones por defecto
     esp_wifi_init(&cfg);                                        //Inicializa driver wifi
     esp_wifi_set_mode(WIFI_MODE_STA);                           //Coloca el modo como modo cliente    
@@ -95,12 +119,13 @@ static void fast_wifi_connect() {
     esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);    //Coloca la configuracion
     esp_wifi_start();                               //Enciende el driver  
     esp_wifi_connect();                             //Conecta WIFI
-    //Esperar 10 segundos a que la conexion se establezca y setea los bits 
     EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(10000));
     if (bits & WIFI_CONNECTED_BIT) {
         guardar_conexion(); //Guarda la conexion si se logro establecer
+        char* json = "{\"categoria\":\"otros\",\"peso_g\":20,\"gas_level\":0.45,\"timestamp\":\"2026-04-16T12:30:00Z\",\"objeto\":\"a\"}";
+        http_post("https://recibirresiduo-epnwwyvrcq-uc.a.run.app/recibirResiduo", json);
     } else {
-        ESP_LOGE(component, "No se pudo conectar");
+        ESP_LOGE(componente, "No se pudo conectar");
     }
 }
 
@@ -110,14 +135,14 @@ static void normal_wifi_connect(){
     //Registrar eventos para desconexion o evento cualquiera y obtencion de IP
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,  &wifi_event_handler, NULL);
     esp_event_handler_register(IP_EVENT,   IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL);
-
+    
     esp_netif_init();                       //Inicia la capa TCP/IP
     esp_netif_create_default_wifi_sta();    //Inicia la interfaz wifi STA
-
+    
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();    //Estructura de configuracion DEFAULT
     esp_wifi_init(&cfg);                                    //Inicia el driver con la configuracion default
     esp_wifi_set_mode(WIFI_MODE_STA);                       //Modo cliente (estacion)
-
+    
     //Estructura con la configuracion del wifi (Wifi_ID, Wifi_PWD, Modo de autentificacion, Certificados)
     wifi_config_t wifi_cfg = {
         .sta = {
@@ -129,14 +154,15 @@ static void normal_wifi_connect(){
     };
     esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);    //Coloca la configuracion del WIFI
     esp_wifi_start();                               //Enciende el driver
+    set_dns_manual();
     esp_wifi_connect();                             //Establece la conexion
-
+    
     //Esperar 10 segundos a que la conexion se establezca y setea los bits 
     EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(10000));
     if (bits & WIFI_CONNECTED_BIT) {
         guardar_conexion(); //Guarda la conexion si se logro establecer
     } else {
-        ESP_LOGE(component, "No se pudo conectar");
+        ESP_LOGE(componente, "No se pudo conectar");
     }
 }
 
@@ -144,12 +170,12 @@ static void normal_wifi_connect(){
 void establecer_conexion(){
     if (rtc_wifi_saved){
         //Si se guardaron los parametros de conexion se usa el metodo rapido
-        ESP_LOGI(component, "Usando Conexion Rapida");
+        ESP_LOGI(componente, "Usando Conexion Rapida");
         fast_wifi_connect();
     }
     else{
         //Si es primera conexion usa el metodo lento
-        ESP_LOGI(component, "Establecer Primera Conexion");
+        ESP_LOGI(componente, "Establecer Primera Conexion");
         normal_wifi_connect();
     }
 }

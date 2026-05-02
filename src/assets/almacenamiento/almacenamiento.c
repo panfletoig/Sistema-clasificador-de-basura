@@ -10,7 +10,7 @@
 #define SD_CLK  39
 #define SD_DATA 40
 
-static const char* componente = "MICROSD";
+static const char* componente = "microsd";
 
 void mount_sd(void) {
     vTaskDelay(pdMS_TO_TICKS(500));

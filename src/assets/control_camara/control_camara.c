@@ -27,8 +27,8 @@
 #define CAM_Y3      9   // BIT D2
 #define CAM_Y2      11  // BIT D1 MENOS SIGNIFICATIVO
 
-#define IMG_WIDTH   96
-#define IMG_HEIGHT  96
+#define IMG_WIDTH   224
+#define IMG_HEIGHT  224
 
 static const char *component = "control_camara"; //Usado en LOGS
 
@@ -144,6 +144,6 @@ esp_err_t get_picture(uint8_t **out_rgb888, size_t *out_size) {
     esp_camera_fb_return(pic);
     esp_camera_deinit();
 
-    ESP_LOGI(component, "Imagen transofrmada: %dx%d (%d bytes)", IMG_HEIGHT, IMG_WIDTH, buf_size);
+    ESP_LOGI(component, "Imagen transofromada: %dx%d (%d bytes)", IMG_HEIGHT, IMG_WIDTH, buf_size);
     return ESP_OK;
 }
