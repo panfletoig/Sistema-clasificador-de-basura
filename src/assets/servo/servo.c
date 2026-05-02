@@ -5,29 +5,24 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-// ─── Pines ────────────────────────────────────────────────────────────────────
 #define PIN_SERVO_X         GPIO_NUM_47
 #define PIN_SERVO_Z         GPIO_NUM_48
 
-// ─── PWM Común ────────────────────────────────────────────────────────────────
 #define SERVO_PWM_MODE      LEDC_LOW_SPEED_MODE
 #define SERVO_PWM_TIMER     LEDC_TIMER_0
 #define SERVO_PWM_FREQ_HZ   50
 #define SERVO_PWM_RES       LEDC_TIMER_14_BIT
 #define SERVO_PERIOD_US     20000
 
-// ─── Canales (uno por servo) ──────────────────────────────────────────────────
 #define SERVO_X_CHANNEL     LEDC_CHANNEL_0
 #define SERVO_Z_CHANNEL     LEDC_CHANNEL_1
 
-// ─── Rangos de posición (en valor ADC 0–4095) ─────────────────────────────────
 #define SERVO_X_MIN         100
 #define SERVO_X_MAX         4095
 
-#define SERVO_Z_MIN         500     // ← ajusta según tu servo/mecanismo
+#define SERVO_Z_MIN         500     
 #define SERVO_Z_MAX         3500
 
-// ─── Pulso PWM en microsegundos ───────────────────────────────────────────────
 #define SERVO_MIN_US        500
 #define SERVO_MAX_US        2500
 
@@ -42,11 +37,9 @@ static uint32_t pulse_us_to_duty(uint32_t pulse_us)
 
 static uint32_t adc_to_pulse_us(int adc_val, int adc_min, int adc_max)
 {
-    // Clamp
     if (adc_val < adc_min) adc_val = adc_min;
     if (adc_val > adc_max) adc_val = adc_max;
 
-    // Mapeo lineal ADC → microsegundos de pulso
     return SERVO_MIN_US +
            ((uint32_t)(adc_val - adc_min) * (SERVO_MAX_US - SERVO_MIN_US)) /
            (uint32_t)(adc_max - adc_min);
