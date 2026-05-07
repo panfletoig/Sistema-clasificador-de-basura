@@ -80,24 +80,24 @@ static void resize_rgb565_to_rgb888(const uint16_t *src, int src_w, int src_h, u
     int x_ratio = (src_w << 16) / IMG_WIDTH + 1;
     int y_ratio = (src_h << 16) / IMG_HEIGHT + 1;
 
-    for (int j = 0; j < IMG_WIDTH; j++) {
+    for (int j = 0; j < IMG_HEIGHT; j++) {
         int y = (j * y_ratio) >> 16;
 
-        for (int i = 0; i < IMG_HEIGHT; i++) {
+        for (int i = 0; i < IMG_WIDTH; i++) {
             int x = (i * x_ratio) >> 16;
 
             uint16_t pixel = src[y * src_w + x];
+            pixel = (pixel >> 8) | (pixel << 8); 
 
             uint8_t r = (pixel >> 11) & 0x1F;
             uint8_t g = (pixel >> 5)  & 0x3F;
             uint8_t b = pixel & 0x1F;
 
-            r <<= 3;
-            g <<= 2;
-            b <<= 3;
+            r = (r << 3) | (r >> 2); 
+            g = (g << 2) | (g >> 4); 
+            b = (b << 3) | (b >> 2); 
 
             int idx = (j * IMG_WIDTH + i) * 3;
-
             dst[idx]     = r;
             dst[idx + 1] = g;
             dst[idx + 2] = b;

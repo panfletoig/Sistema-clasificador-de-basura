@@ -79,6 +79,9 @@ esp_err_t init_config(){
         conexion_wifi();
         err = ESP_FAIL;
     }
+    else{
+        servo_init();
+    }
     info_memoria("FLASH");  //Imprime la informacion de la memoria flash
     return err;
 }
@@ -93,15 +96,23 @@ esp_err_t init_config(){
  * - REGISTROS DE MEMORIA         *
  **********************************/
 void proceso(){
-    servo_init();
-    mount_sd();
-    conexion_wifi();
-    info_memoria("WIFI");   //Imprime informacion de la memoria flash luego de la conexion
-
     //Control de la camara              
+    mount_sd();
     uint8_t *out = NULL;    //Crea un puntero que esta a nulo
     size_t out_size = 0;    //Asigna el tamaño a 0
-    
+    if(ESP_OK != get_picture(&out, &out_size)) {
+        ESP_LOGE(componente, "error al tomar fotografia");
+        return;    
+    }
+    save_as_bmp("/sdcard/filetest.bmp", out, 224, 224);
+    control_IA(out);
+    free(out);
+    out = NULL;
+    return;
+    conexion_wifi();
+    info_memoria("WIFI");
+
+    /*
     ESP_LOGI(componente, "---------------------");
     servo_x_mover(1);
     servo_z_mover(3000);
@@ -114,14 +125,7 @@ void proceso(){
     servo_z_mover(10);
     servo_z_mover(1500);
     ESP_LOGI(componente, "---------------------");
-    
-    if(ESP_OK != get_picture(&out, &out_size)) {
-        ESP_LOGE(componente, "error al tomar fotografia");
-        return;    
-    }
-    control_IA(out);
-    free(out);
-    out = NULL;
+    */
     return;
 }
 
@@ -138,19 +142,21 @@ void control_IA(uint8_t *out){
         ESP_LOGE(componente, "Error al correr el modelo %s", esp_err_to_name(err));
         return;
     }
+    ESP_LOGI(componente, "Char -- - --- - - %c", resultado);
+    char salida_modelo[10];
     if(resultado == '0'){
-        resultado = 'O';
+        strncpy(salida_modelo, "otros", sizeof(salida_modelo) - 1);
     }
     else if(resultado == '1'){
-        resultado = 'C';
+        strncpy(salida_modelo, "organico", sizeof(salida_modelo) - 1);
     }
     else if(resultado == '2'){
-        resultado = 'P';
+        strncpy(salida_modelo, "papel", sizeof(salida_modelo) - 1);
     }
     else{
-        resultado = 'N';
+        strncpy(salida_modelo, "plasticos", sizeof(salida_modelo) - 1);
     }
-    ESP_LOGI(componente, "Resultado inferencia: %c", resultado);   
+    ESP_LOGI(componente, "Resultado inferencia: %s", salida_modelo);   
     #endif
     return;
 }

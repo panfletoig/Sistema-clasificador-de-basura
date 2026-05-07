@@ -25,77 +25,71 @@
 #define ALTO_IMAGEN  224      //Alto de imagen
 
 const static char* componente = "vision_tlflite"; //Nombre del componente
-constexpr int kTensorArenaSize = 700 * 1024;      //Area de memoria para tensores
+constexpr int kTensorArenaSize = 700 * 1024;     //Area de memoria para tensores
 static uint8_t* tensor_arena = nullptr;           //Memoria de longitud KTensorArenaSize
 
-static tflite::MicroMutableOpResolver<12> micro_op_resolver;  //Operaciones permitidas para el modelo de IA
-
-const tflite::Model *model = nullptr;            //Usado para cargar el modelo
-tflite::MicroInterpreter *interpreter = nullptr; //Realiza interpretaciones
-TfLiteTensor *input = nullptr;                   //Entrada del modelo
-TfLiteTensor *output = nullptr;                  //Salida del modelo
-
 //Carga las operaciones permitidas para el modelo
-TfLiteStatus RegisterOps(tflite::MicroMutableOpResolver<12> &op_resolver)
+TfLiteStatus RegisterOps(tflite::MicroMutableOpResolver<8> &op_resolver)
 {
-    TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D());    //Convoluciones optimizadas
-    TF_LITE_ENSURE_STATUS(op_resolver.AddFullyConnected());     //Conecta todas las neuronas de la red
-    TF_LITE_ENSURE_STATUS(op_resolver.AddDequantize());         //Optimizaciones
-    TF_LITE_ENSURE_STATUS(op_resolver.AddHardSwish());          //Desicion 
-    TF_LITE_ENSURE_STATUS(op_resolver.AddMaxPool2D());          //Saca valores maximos
-    TF_LITE_ENSURE_STATUS(op_resolver.AddQuantize());           //Optimizaciones
-    TF_LITE_ENSURE_STATUS(op_resolver.AddReshape());            //Transformaciones
-    TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());            //Funcion SOFTMAX para probabilidades
-    TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());             //Convoluciones filtros
-    TF_LITE_ENSURE_STATUS(op_resolver.AddMul());                //Multiplicar
-    TF_LITE_ENSURE_STATUS(op_resolver.AddAdd());                //Sumar
-    TF_LITE_ENSURE_STATUS(op_resolver.AddMean());               //Promediar
+    TF_LITE_ENSURE_STATUS(op_resolver.AddAdd());                
+    TF_LITE_ENSURE_STATUS(op_resolver.AddMul());                
+    TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());               
+    TF_LITE_ENSURE_STATUS(op_resolver.AddHardSwish());               
+    TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D());               
+    TF_LITE_ENSURE_STATUS(op_resolver.AddMean());               
+    TF_LITE_ENSURE_STATUS(op_resolver.AddFullyConnected());               
+    TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());               
     return kTfLiteOk;
 }
 
-//Normaliza los valores de entrada
 void preprocesa_imagen(uint8_t *raw_data, int8_t *image_data)
 {
-    unsigned long size = ANCHO_IMAGEN * ALTO_IMAGEN * 3; //Ancho X Alto X Canales (R, G, B) 
-    for (int i = 0; i < size; i++) {
-        //Comprueba si el tipo de modelo es signado o no signado
-        if ((*input).type == kTfLiteInt8) {
-            image_data[i] = static_cast<int8_t>(raw_data[i] - 128); 
-        } else {
-            image_data[i] = static_cast<uint8_t>(raw_data[i]);
+    int total_pixels = ANCHO_IMAGEN * ALTO_IMAGEN;
+    const float input_scale = 0.007843f;
+    const int   input_zp    = -1;
+    
+    for (int i = 0; i < total_pixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float norm = (float)raw_data[i * 3 + c] / 127.5f - 1.0f;
+            int val = (int)roundf(norm / input_scale) + input_zp;
+            if (val < -128) val = -128;
+            if (val >  127) val =  127;
+            image_data[i * 3 + c] = (int8_t)val;
         }
     }
 }
 
-void printPredictedClass(char* resultado)
+void printPredictedClass(char* resultado, TfLiteTensor* output)
 {
-    int output_size = 4;        //4 posibles predicciones
-    int8_t umbral = -128;       //Valor de control para prediccion
-    int prediccion = -1;        //donde se almacena la prediccion
+    int   prediccion = -1;
+    float mejor_prob = -1.0f;
+    const char* nombres[] = {"NoAprobechable", "Organicos", "Papel-Carton", "Plasticos"};
 
-    for (int i = 0; i < output_size; i++)
-    {
-        //Obtiene el valor de una prediccion
-        int8_t value = (*output).data.int8[i];
-        ESP_LOGI(componente, "valor - %d", value);
-        //La compara con el umbral y si es mayor toma el valor mayor
-        if (value > umbral)
-        {
-            umbral = value; //Coloca como nuevo umbral el valor mayor
-            prediccion = i; //Guarda el valor de la prediccion
+    float out_scale = (*output).params.scale;
+    int   out_zp    = (*output).params.zero_point;
+
+    ESP_LOGI(componente, "Output type=%d scale=%.8f zp=%d",
+        (*output).type, out_scale, out_zp);
+
+    for (int i = 0; i < 4; i++) {
+        int8_t raw = (*output).data.int8[i];
+        float prob = (raw - out_zp) * out_scale;  // siempre INT8
+        ESP_LOGI(componente, "Clase[%d]=%s raw=%d prob=%.4f", i, nombres[i], raw, prob);
+
+        if (prob > mejor_prob) {
+            mejor_prob = prob;
+            prediccion = i;
         }
     }
 
-    if (prediccion != -1)
-    {
-        *resultado = '0' + prediccion; 
-        ESP_LOGI(componente, "Prediccion exitosa: %d", prediccion);
+    if (mejor_prob < 0.5f) {
+        *resultado = '\0';
+        ESP_LOGW(componente, "Confianza insuficiente: %.2f%%", mejor_prob * 100);
+        return;
     }
-    else
-    {
-        *resultado = '\0'; 
-        ESP_LOGE(componente, "No suficientemente seguro para prediccion");
-    }
+
+    *resultado = '0' + prediccion;
+    ESP_LOGI(componente, "Clase: %s (%.2f%%)", nombres[prediccion], mejor_prob * 100);
 }
 
 /****************************************************************
@@ -105,75 +99,74 @@ void printPredictedClass(char* resultado)
  *****************************************************************/
 esp_err_t realiza_inferencia(uint8_t* input_buffer, char* resultado)
 {
-    const unsigned char *model_data = modelo_tflite; //Obtiene el modelo
-    /* Si el puntero de es nulo le asigna espacio en la SPIRAM (Ram rapida) */
+    const unsigned char *model_data = modelo_tflite;
+
     if (tensor_arena == nullptr) {
-        //Le asigna lognitud de kTensorArenaSize que va ser interpretrado como unsigned int 8
         tensor_arena = (uint8_t*) heap_caps_malloc(kTensorArenaSize, MALLOC_CAP_SPIRAM);
         if (tensor_arena == nullptr) {
             ESP_LOGE(componente, "Fallo al alojar tensor_arena en PSRAM");
             return ESP_ERR_NO_MEM;
         }
-        ESP_LOGI(componente, "tensor_arena: %d KB en PSRAM", kTensorArenaSize / 1024);
     }
-    int64_t start_time = esp_timer_get_time();  //Obtiene tiempo previo a cargar el modelo
-    model = tflite::GetModel(model_data);       //Carga el modelo
-    int64_t end_time = esp_timer_get_time();    //Obtiene tiempo al terminar de cargar el modelo
-    //Evalua si la version del modelo
-    if ((*model).version() != TFLITE_SCHEMA_VERSION)
-    {
-        /* Si falla retorna el error */
+
+    tflite::MicroMutableOpResolver<8> op_resolver;
+    TF_LITE_ENSURE_STATUS(op_resolver.AddAdd());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddMul());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddHardSwish());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddMean());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddFullyConnected());
+    TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());
+
+    const tflite::Model *model = tflite::GetModel(model_data);
+    if (model->version() != TFLITE_SCHEMA_VERSION) {
         ESP_LOGE(componente, "Model schema version mismatch");
         return ESP_ERR_NOT_SUPPORTED;
     }
-    ESP_LOGI(componente, "Model load time: %.6f s", (end_time - start_time)/ 1000000.0);
-    
-    RegisterOps(micro_op_resolver); // Carga las operaciones validas para el modelo
-    
-    //Crea un interprete del modelo con las operaciones permitidas un area para los tensores y la longitud de esa area
-    tflite::MicroInterpreter static_interpreter(model, micro_op_resolver, tensor_arena, kTensorArenaSize);
-    interpreter = &static_interpreter; //Asigna la direccion de memoria a el puntero del interprete
+z
+    // ✅ Limpiar arena antes de cada uso
+    memset(tensor_arena, 0, kTensorArenaSize);
 
-    // Asignar tensores
-    if ((*interpreter).AllocateTensors() != kTfLiteOk)
-    {
+    // ✅ Interpreter en heap — no en stack
+    tflite::MicroInterpreter* interp = new tflite::MicroInterpreter(
+        model, op_resolver, tensor_arena, kTensorArenaSize);
+
+    if (interp->AllocateTensors() != kTfLiteOk) {
         ESP_LOGE(componente, "Failed to allocate tensors.");
+        delete interp;
         return ESP_ERR_NO_MEM;
     }
-    
-    //Asigna el puntero al input del modelo input = input del modelo (imagen)
-    input = (*interpreter).input(0);
-    if (input == nullptr) {
-        ESP_LOGE(componente, "input es nullptr — modelo incompatible o arena insuficiente");
+
+    TfLiteTensor *input     = interp->input(0);
+    TfLiteTensor *output    = interp->output(0);
+
+    if (input == nullptr || output == nullptr) {
+        ESP_LOGE(componente, "input o output nullptr");
+        delete interp;
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    //Asigna el puntero a la salida del modelo output = salida del modelo (respuesta)
-    output = (*interpreter).output(0);
-    if (output == nullptr) {
-        ESP_LOGE(componente, "output es nullptr");
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-
-    //Genera un arreglo de int8_t en spiram con ancho * alto * canales(R, G, B)
-    int8_t *image_data = (int8_t*) heap_caps_malloc(ANCHO_IMAGEN * ALTO_IMAGEN * 3, MALLOC_CAP_SPIRAM);
+    // Preprocesar y copiar imagen
+    int8_t *image_data = (int8_t*) heap_caps_malloc(
+        ANCHO_IMAGEN * ALTO_IMAGEN * 3, MALLOC_CAP_SPIRAM);
     if (image_data == nullptr) {
-        ESP_LOGE(componente, "Fallo al alojar image_data — PSRAM insuficiente");
+        delete interp;
         return ESP_ERR_NO_MEM;
     }
 
-    //Realiza preproseso dependiendo si el modelo espera sin signo o con signo
     preprocesa_imagen(input_buffer, image_data);
-    
-    // Copiar datos preprocesados al tensor de entrada
-    memcpy((*input).data.int8, image_data, sizeof(image_data));
-    
-    start_time = esp_timer_get_time();  //Obtiene tiempo antes de inferencia
-    (*interpreter).Invoke();            //Realiza la inferencia
-    end_time = esp_timer_get_time();    //Obtiene tiempo despues de inferencia
-    ESP_LOGI(componente, "Inference time: %.6f s", (end_time - start_time)/ 1000000.0);
-    // Manejar la salida del modelo
-    printPredictedClass(resultado);
+    memcpy(input->data.int8, image_data, ANCHO_IMAGEN * ALTO_IMAGEN * 3);
+    heap_caps_free(image_data);
+
+    int64_t t0 = esp_timer_get_time();
+    interp->Invoke();
+    ESP_LOGI(componente, "Inference time: %.3f s", 
+             (esp_timer_get_time() - t0) / 1000000.0);
+
+    printPredictedClass(resultado, output);
+
+    delete interp;
     return ESP_OK;
 }
 

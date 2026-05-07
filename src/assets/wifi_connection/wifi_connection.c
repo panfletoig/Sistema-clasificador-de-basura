@@ -34,12 +34,7 @@ static RTC_DATA_ATTR uint32_t  rtc_mask;               //Mascara de subred
 static RTC_DATA_ATTR bool      rtc_wifi_saved = false; //Indica si esta guardada la conexion
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data) {
-    if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        /* Si se desconectado intenta reconectar */
-        ESP_LOGW(componente, "Desconectado, reintentando...");
-        esp_wifi_connect();
-    }
-    else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         /* Si ya hay una ip disponible entonces desbloquea el evento guarda el evento */ 
         xEventGroupSetBits(wifi_events, WIFI_CONNECTED_BIT);
     }
@@ -79,50 +74,51 @@ void set_dns_manual() {
 }
 
 static void fast_wifi_connect() {
-    wifi_events = xEventGroupCreate();  //Crea el event grop
-    esp_event_loop_create_default();    //Inicia el loop de eventos    
-    //Registrar eventos para desconexion o evento cualquiera y obtencion de IP
-    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,  &wifi_event_handler, NULL);
+    wifi_events = xEventGroupCreate();
+    esp_event_loop_create_default();
+    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,    &wifi_event_handler, NULL);
     esp_event_handler_register(IP_EVENT,   IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL);
 
-    esp_netif_init();                                           //Inicia la capa TCP/IP
-    esp_netif_t *netif = esp_netif_create_default_wifi_sta();   //Provee la configuracion de modo cliente
-    esp_netif_dhcpc_stop(netif);                                //Asigna IP estatica
-    
-    //Colocamos las configuraciones almacenadas
+    esp_netif_init();
+    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+    esp_netif_dhcpc_stop(netif);
+
     esp_netif_ip_info_t ip_info = {
         .ip.addr      = rtc_ip,
         .gw.addr      = rtc_gw,
         .netmask.addr = rtc_mask,
     };
+    esp_netif_set_ip_info(netif, &ip_info);
 
-    esp_netif_set_ip_info(netif, &ip_info);                     //Coloca la info de la estructura
-    
-    set_dns_manual();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);  
+    esp_wifi_set_mode(WIFI_MODE_STA);
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();        //Usa las configuraciones por defecto
-    esp_wifi_init(&cfg);                                        //Inicializa driver wifi
-    esp_wifi_set_mode(WIFI_MODE_STA);                           //Coloca el modo como modo cliente    
-
-    // Conectar directo al canal y BSSID conocidos
     wifi_config_t wifi_cfg = {
         .sta = {
-            .ssid     = wifi_id,
-            .password = wifi_pwd,
-            .channel  = rtc_channel,
+            .ssid      = wifi_id,
+            .password  = wifi_pwd,
+            .channel   = rtc_channel,
             .bssid_set = true,
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
             .sae_pwe_h2e        = WPA3_SAE_PWE_HUNT_AND_PECK,
         }
     };
-    memcpy(wifi_cfg.sta.bssid, rtc_bssid, 6);       //Copia la MAC address de la RTC
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);    //Coloca la configuracion
-    esp_wifi_start();                               //Enciende el driver  
-    esp_wifi_connect();                             //Conecta WIFI
-    EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(10000));
+    memcpy(wifi_cfg.sta.bssid, rtc_bssid, 6);
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+    esp_wifi_start();
+    esp_wifi_set_ps(WIFI_PS_NONE); 
+    set_dns_manual();              
+    esp_wifi_connect();
+
+    EventBits_t bits = xEventGroupWaitBits(
+        wifi_events, WIFI_CONNECTED_BIT,
+        pdFALSE, pdFALSE, pdMS_TO_TICKS(1000)
+    );
+
     if (bits & WIFI_CONNECTED_BIT) {
-        guardar_conexion(); //Guarda la conexion si se logro establecer
-        char* json = "{\"categoria\":\"otros\",\"peso_g\":20,\"gas_level\":0.45,\"timestamp\":\"2026-04-16T12:30:00Z\",\"objeto\":\"a\"}";
+        char* json = "{\"categoria\":\"otros\",\"peso_g\":20,...}";
         http_post("https://recibirresiduo-epnwwyvrcq-uc.a.run.app/recibirResiduo", json);
     } else {
         ESP_LOGE(componente, "No se pudo conectar");
@@ -141,6 +137,7 @@ static void normal_wifi_connect(){
     
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();    //Estructura de configuracion DEFAULT
     esp_wifi_init(&cfg);                                    //Inicia el driver con la configuracion default
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);                 //Almacena en ram
     esp_wifi_set_mode(WIFI_MODE_STA);                       //Modo cliente (estacion)
     
     //Estructura con la configuracion del wifi (Wifi_ID, Wifi_PWD, Modo de autentificacion, Certificados)
@@ -154,11 +151,12 @@ static void normal_wifi_connect(){
     };
     esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);    //Coloca la configuracion del WIFI
     esp_wifi_start();                               //Enciende el driver
+    esp_wifi_set_ps(WIFI_PS_NONE);                         
     set_dns_manual();
     esp_wifi_connect();                             //Establece la conexion
     
     //Esperar 10 segundos a que la conexion se establezca y setea los bits 
-    EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(10000));
+    EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(1000));
     if (bits & WIFI_CONNECTED_BIT) {
         guardar_conexion(); //Guarda la conexion si se logro establecer
     } else {
